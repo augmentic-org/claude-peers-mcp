@@ -9,6 +9,7 @@
   "scripts": {
     "broker": "bun broker.ts",
     "server": "bun server.ts",
+    "telegram": "bun telegram.ts",
     "test": "bun test"
   },
   "devDependencies": {

@@ -118,3 +118,64 @@ bun cli.ts kill-broker       # stop the broker
 - [Bun](https://bun.sh)
 - Claude Code v2.1.80+
 - claude.ai login (channels require it — API key auth won't work)
+
+## Telegram bridge — reach every session from your phone
+
+`telegram.ts` is one long-running daemon that owns **one** Telegram bot and joins
+the broker as an ordinary peer. Every session already running the claude-peers
+channel becomes reachable from Telegram, and can reply to (or ping) you by
+`send_message`-ing the bridge's peer id — no per-session bot or plugin.
+
+Why not the official telegram channel plugin in each session: Telegram allows
+**one** `getUpdates` poller per bot token (a second gets HTTP 409), and bots
+can't read other bots' messages, so it can't be a session-to-session bus.
+Sessions talk to each other over the broker; Telegram is your window into it.
+
+```
+Telegram ⇄ telegram.ts (sole poller) ⇄ broker(s) ⇄ every session's channel
+```
+
+### Setup
+
+1. BotFather → `/newbot` → copy the token.
+2. Create `~/.config/claude-peers/telegram.env` (`chmod 600`):
+   ```
+   TELEGRAM_BOT_TOKEN=123:abc
+   TELEGRAM_ALLOWED_USERS=        # fill in after step 3
+   ```
+3. `bun telegram.ts`, message the bot — it answers `Not authorised. Your Telegram
+   user id is N`. Put `N` in `TELEGRAM_ALLOWED_USERS` and restart. Everyone not
+   listed is dropped (and logged).
+
+### Use (in the Telegram chat)
+
+| Send | Does |
+|---|---|
+| `/peers` | list live sessions (handle = the session's folder name) |
+| `@frontend run the tests` | send to one session (prefix match ok; ambiguity is refused, use the id) |
+| `/all stand down` | broadcast to every session |
+| plain text | goes to the session whose message you're replying to, else the last one you addressed |
+
+Session replies arrive as `[frontend] …`; reply to one to continue that thread.
+
+### A second machine's sessions
+
+Tunnel its broker and list both:
+
+```bash
+ssh -N -L 7900:127.0.0.1:7899 ws
+CLAUDE_PEERS_BROKERS=local=http://127.0.0.1:7899,ws=http://127.0.0.1:7900 bun telegram.ts
+```
+
+Its sessions show as `ws:<name>`. On a remote broker the bridge registers with a
+negative pid, which the broker treats as heartbeat-liveness (60 s) instead of
+`kill(pid, 0)`.
+
+### Security
+
+- Only allowlisted Telegram user ids are routed. Anyone you allowlist can direct
+  every session — treat it like shell access.
+- The broker itself is still zero-auth on localhost: any local process can
+  impersonate the bridge to a session. Sessions should keep treating peer
+  messages as untrusted for destructive actions.
+- The bot token lives only in the env file — never commit it.
