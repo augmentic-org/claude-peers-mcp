@@ -58,15 +58,29 @@ db.run(`
   )
 `);
 
-// Clean up stale peers (PIDs that no longer exist) on startup
+// Liveness. A normal peer is a local process: alive iff kill(pid, 0) succeeds
+// (signal 0 doesn't kill, just checks). A peer registered with a NEGATIVE pid
+// lives on another host (e.g. the Telegram bridge reaching this broker over an
+// ssh tunnel) — its pid means nothing here, so it is alive iff it heartbeated
+// recently. (pid <= 0 must never reach kill(): kill(0|-1, 0) targets a process
+// group / every process and would report "alive" forever.)
+const REMOTE_PEER_TTL_MS = 60_000;
+
+function isAlive(peer: { pid: number; last_seen: string }): boolean {
+  if (peer.pid <= 0) return Date.now() - Date.parse(peer.last_seen) < REMOTE_PEER_TTL_MS;
+  try {
+    process.kill(peer.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Clean up stale peers on startup
 function cleanStalePeers() {
-  const peers = db.query("SELECT id, pid FROM peers").all() as { id: string; pid: number }[];
+  const peers = db.query("SELECT id, pid, last_seen FROM peers").all() as { id: string; pid: number; last_seen: string }[];
   for (const peer of peers) {
-    try {
-      // Check if process is still alive (signal 0 doesn't kill, just checks)
-      process.kill(peer.pid, 0);
-    } catch {
-      // Process doesn't exist, remove it
+    if (!isAlive(peer)) {
       db.run("DELETE FROM peers WHERE id = ?", [peer.id]);
       db.run("DELETE FROM messages WHERE to_id = ? AND delivered = 0", [peer.id]);
     }
@@ -196,14 +210,10 @@ function handleListPeers(body: ListPeersRequest): Peer[] {
 
   // Verify each peer's process is still alive
   return peers.filter((p) => {
-    try {
-      process.kill(p.pid, 0);
-      return true;
-    } catch {
-      // Clean up dead peer
-      deletePeer.run(p.id);
-      return false;
-    }
+    if (isAlive(p)) return true;
+    // Clean up dead peer
+    deletePeer.run(p.id);
+    return false;
   });
 }
 

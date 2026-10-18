@@ -15,6 +15,7 @@ Peer discovery and messaging MCP channel for Claude Code instances.
 - `shared/types.ts` — Shared TypeScript types for broker API.
 - `shared/summarize.ts` — Auto-summary generation via gpt-5.4-nano.
 - `cli.ts` — CLI utility for inspecting broker state.
+- `telegram.ts` — Telegram bridge daemon: one bot, joins the broker(s) as a peer so the human can reach every session from Telegram. Routing logic in `shared/route.ts` (tested).
 
 ## Running
 
